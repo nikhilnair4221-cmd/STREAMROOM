@@ -1,0 +1,13 @@
+server:
+  port: ${PORT:8080}
+
+streamroom:
+  # Comma-separated list of allowed origins for the WebSocket endpoint.
+  # "*" is fine for local development; set this to your real frontend
+  # origin(s) before deploying anywhere.
+  allowed-origins: ${STREAMROOM_ALLOWED_ORIGINS:*}
+
+logging:
+  level:
+    root: INFO
+    com.streamroom: DEBUG
