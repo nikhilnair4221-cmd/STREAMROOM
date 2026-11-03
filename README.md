@@ -128,6 +128,17 @@ wss://your-render-service.onrender.com/ws/signaling
 
 Set the frontend's `VITE_SIGNALING_URL` to that secure WebSocket URL before building the frontend.
 
+For the deployed services, use these values:
+
+| Service | Variable | Value |
+|---|---|---|
+| Vercel | `VITE_SIGNALING_URL` | `wss://steamroom-backend.onrender.com/ws/signaling` |
+| Vercel | `VITE_STUN_URLS` | `stun:stun.l.google.com:19302` |
+| Render | `STREAMROOM_ALLOWED_ORIGINS` | `https://streamroom-pearl.vercel.app` |
+| Render | `PORT` | Provided automatically by Render |
+
+`VITE_TURN_URLS`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` are optional and should only be added to Vercel when approved TURN infrastructure and deployment secrets are available. Do not commit those values.
+
 ## Validation status
 
 Verified:

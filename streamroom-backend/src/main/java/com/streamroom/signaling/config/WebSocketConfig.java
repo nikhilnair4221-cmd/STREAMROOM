@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSocket
@@ -24,7 +26,11 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
         registry.addHandler(signalingWebSocketHandler, "/ws/signaling")
-                .setAllowedOrigins(allowedOrigins);
+                .setAllowedOrigins(origins.toArray(String[]::new));
     }
 }
