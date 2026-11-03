@@ -71,7 +71,7 @@ Start the backend from `streamroom-backend`:
 
 ```bash
 cd streamroom-backend
-mvn spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8080
 ```
 
 The signaling server listens at:
@@ -105,6 +105,28 @@ Open the Vite URL shown in the terminal, usually `http://localhost:5173`.
 When entering a room, allow camera and microphone access. Screen sharing requires a browser and operating-system environment that supports `navigator.mediaDevices.getDisplayMedia()`.
 
 For production deployments, configure a TURN server for users behind restrictive NAT or firewall environments.
+
+## Deploying the backend to Render with Docker
+
+The backend includes a multi-stage Dockerfile at
+[`streamroom-backend/Dockerfile`](./streamroom-backend/Dockerfile). It builds the Spring Boot application with Java 21 and runs the executable JAR as a non-root user.
+
+Create a Render **Web Service** with these settings:
+
+1. Connect the GitHub repository.
+2. Select **Docker** as the runtime.
+3. Set the service **Root Directory** to `streamroom-backend`.
+4. Set the Dockerfile path to `Dockerfile`.
+5. Set the service port to `10000`.
+6. Add `STREAMROOM_ALLOWED_ORIGINS` with the deployed frontend origin, such as `https://your-frontend.example.com`.
+
+The application binds to `0.0.0.0` and reads Render's `PORT` environment variable. It defaults to port `10000` when `PORT` is not set. The WebSocket endpoint is:
+
+```text
+wss://your-render-service.onrender.com/ws/signaling
+```
+
+Set the frontend's `VITE_SIGNALING_URL` to that secure WebSocket URL before building the frontend.
 
 ## Validation status
 
