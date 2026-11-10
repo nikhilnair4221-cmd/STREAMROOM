@@ -12,9 +12,7 @@ dist
 dist-ssr
 *.local
 streamroom-backend/target
-legacy-root-frontend
 runtime-validation-report.md
-streamroom-backend.zip
 
 # Editor directories and files
 .vscode/*

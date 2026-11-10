@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { AlertIcon, LogoMark } from './icons';
+import { AlertIcon, LinkIcon, LogoMark, VideoIcon } from './icons';
 import { generateRoomCode, normalizeRoomCode, validateRoomCode, type FriendlyError } from '../lib/room';
+import { CosmicBackground } from './CosmicBackground';
 
 interface Props {
   initialRoom: string;
@@ -8,12 +9,17 @@ interface Props {
   invited: boolean;
   /** A failed join attempt, shown inline instead of replacing the page. */
   error: FriendlyError | null;
-  onJoin(roomId: string): void;
+  onJoin(roomId: string, displayName: string): void;
 }
+
+const NAME_KEY = 'streamroom.displayName';
+const DEFAULT_NAME = 'Guest';
 
 export function Lobby({ initialRoom, invited, error, onJoin }: Props) {
   const [code, setCode] = useState(initialRoom);
+  const [name, setName] = useState(() => localStorage.getItem(NAME_KEY) ?? '');
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -22,61 +28,58 @@ export function Lobby({ initialRoom, invited, error, onJoin }: Props) {
       setFieldError(problem);
       return;
     }
-    onJoin(normalizeRoomCode(code));
+    const displayName = name.trim() || DEFAULT_NAME;
+    if (/[<>]/.test(displayName)) {
+      setNameError('Your name cannot contain angle brackets.');
+      return;
+    }
+    if (displayName.length > 20) {
+      setNameError('Your name must be 20 characters or fewer.');
+      return;
+    }
+    if (!displayName) {
+      setNameError('Enter your name.');
+      return;
+    }
+    localStorage.setItem(NAME_KEY, displayName);
+    onJoin(normalizeRoomCode(code), displayName);
+  };
+
+  const startRoom = () => {
+    const displayName = name.trim() || DEFAULT_NAME;
+    if (/[<>]/.test(displayName)) {
+      setNameError('Your name cannot contain angle brackets.');
+      return;
+    }
+    if (displayName.length > 20) {
+      setNameError('Your name must be 20 characters or fewer.');
+      return;
+    }
+    localStorage.setItem(NAME_KEY, displayName);
+    onJoin(generateRoomCode(), displayName);
   };
 
   return (
     <main className="lobby">
+      <CosmicBackground />
       <section className="lobby__intro">
         <div className="lobby__brand-row">
           <span className="wordmark">
             <LogoMark size={18} />
-            StreamRoom
+            STREAMROOM
           </span>
-          <span className="lobby__eyebrow">Private rooms · up to 6 friends</span>
         </div>
 
         <div className="lobby__copy">
-          <div className="lobby__signal" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <h1 className="lobby__title">
-            Private rooms.
-            <br />
-            <em>Real conversations.</em>
-          </h1>
-          <p className="lobby__lede">
-            A calm, private space for your friends to talk, share screens, and spend time together. No accounts,
-            installs, or noise.
-          </p>
-          <div className="lobby__proof">
-            <span className="lobby__proof-dot" />
-            End-to-end peer connections
-          </div>
+          <h1 className="lobby__title">Your corner of the internet.</h1>
+          <p className="lobby__lede">Watch something. Play something. Stay awhile.</p>
         </div>
-
-        <ul className="lobby__facts">
-          <li>
-            <strong>No accounts</strong>
-            Share a code or a link, that's it.
-          </li>
-          <li>
-            <strong>Up to 6 people</strong>
-            Built for small groups.
-          </li>
-          <li>
-            <strong>Rooms are temporary</strong>
-            A room disappears when the last person leaves.
-          </li>
-        </ul>
       </section>
 
       <section className="lobby__panel" aria-label="Enter a room">
         <div className="lobby__panel-heading">
-          <span className="lobby__panel-kicker">Your room is ready when you are</span>
-          <h2>Start somewhere<br />comfortable.</h2>
+          <span className="lobby__panel-kicker">StreamRoom</span>
+          <h2>Find your people.</h2>
         </div>
         {error && (
           <div className="notice notice--danger" role="alert" data-testid="join-error">
@@ -97,15 +100,13 @@ export function Lobby({ initialRoom, invited, error, onJoin }: Props) {
         )}
 
         <div>
-          <h2 className="lobby__section-title">Start a new room</h2>
-          <p className="lobby__section-hint">We'll generate a code and take you straight in.</p>
           <button
             type="button"
             className="btn btn--primary lobby__action"
             data-testid="create"
-            onClick={() => onJoin(generateRoomCode())}
+            onClick={startRoom}
           >
-            Create room
+            <VideoIcon size={18} /> Create a room
           </button>
         </div>
 
@@ -114,9 +115,21 @@ export function Lobby({ initialRoom, invited, error, onJoin }: Props) {
         </div>
 
         <form onSubmit={submit} noValidate>
-          <h2 className="lobby__section-title" id="join-title">
-            Join with a code
-          </h2>
+          <label className="field__label" htmlFor="display-name">Your name</label>
+          <input
+            id="display-name"
+            data-testid="display-name"
+            className="field__input"
+            value={name}
+            placeholder="Your name"
+            autoComplete="name"
+            onChange={(e) => {
+              setName(e.target.value);
+              setNameError(null);
+            }}
+          />
+          {nameError && <p className="field__error" role="alert" data-testid="name-error">{nameError}</p>}
+          <h2 className="lobby__section-title" id="join-title"><LinkIcon size={16} /> Join a room</h2>
           <label className="field__label" htmlFor="room" style={{ marginTop: 14 }}>
             Room code
           </label>
@@ -143,11 +156,9 @@ export function Lobby({ initialRoom, invited, error, onJoin }: Props) {
             </p>
           )}
           <button type="submit" className="btn lobby__action" data-testid="join">
-            Join room
+            <LinkIcon size={18} /> Join a room
           </button>
         </form>
-
-        <p className="lobby__footnote">Your browser will ask for camera and microphone access when you enter a room.</p>
       </section>
     </main>
   );

@@ -13,6 +13,8 @@ export interface WebRtcStats {
   frameHeight: number | null;
   bitrateReceivedKbps: number | null;
   bitrateSentKbps: number | null;
+  availableOutgoingBitrateKbps: number | null;
+  packetLossRate: number | null;
 }
 
 interface NumericStats {
@@ -44,11 +46,16 @@ export async function collectWebRtcStats(
     frameHeight: null,
     bitrateReceivedKbps: null,
     bitrateSentKbps: null,
+    availableOutgoingBitrateKbps: null,
+    packetLossRate: null,
   };
 
   report.forEach((stat) => {
     if (stat.type === 'candidate-pair' && stat.state === 'succeeded' && typeof stat.currentRoundTripTime === 'number') {
       current.roundTripTimeMs = stat.currentRoundTripTime * 1000;
+      if (typeof stat.availableOutgoingBitrate === 'number') {
+        current.availableOutgoingBitrateKbps = stat.availableOutgoingBitrate / 1000;
+      }
     }
     if ((stat.type === 'inbound-rtp' || stat.type === 'remote-inbound-rtp') && typeof stat.jitter === 'number') {
       current.jitterMs = stat.jitter * 1000;
@@ -76,6 +83,10 @@ export async function collectWebRtcStats(
     if (elapsedSeconds > 0) {
       current.bitrateReceivedKbps = ((current.bytesReceived - previous.bytesReceived) * 8) / elapsedSeconds / 1000;
       current.bitrateSentKbps = ((current.bytesSent - previous.bytesSent) * 8) / elapsedSeconds / 1000;
+      const receivedDelta = current.packetsReceived - previous.packetsReceived;
+      const lostDelta = current.packetsLost - previous.packetsLost;
+      const packets = receivedDelta + lostDelta;
+      current.packetLossRate = packets > 0 ? Math.max(0, lostDelta) / packets : null;
     }
   }
   return current;

@@ -19,6 +19,7 @@ interface Props {
   onSelect?: () => void;
   selectLabel?: string;
   testId?: string;
+  volume?: number;
 }
 
 const CONNECTION_TEXT: Record<RTCPeerConnectionState, string> = {
@@ -49,6 +50,7 @@ export function VideoTile({
   onSelect,
   selectLabel,
   testId,
+  volume = 1,
 }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
 
@@ -56,6 +58,10 @@ export function VideoTile({
     const el = ref.current;
     if (el && el.srcObject !== stream) el.srcObject = stream;
   }, [stream]);
+
+  useEffect(() => {
+    if (ref.current) ref.current.volume = volume;
+  }, [volume]);
 
   const classes = [
     'tile',

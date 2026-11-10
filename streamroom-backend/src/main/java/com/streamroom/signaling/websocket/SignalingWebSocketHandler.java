@@ -138,7 +138,8 @@ public class SignalingWebSocketHandler extends TextWebSocketHandler {
             }
         }
 
-        Peer peer = new Peer(message.getSenderId(), message.getRoomId(), session);
+        String displayName = normalizeDisplayName(message.getDisplayName(), message.getSenderId());
+        Peer peer = new Peer(message.getSenderId(), message.getRoomId(), session, displayName);
         boolean added = room.addPeer(peer);
         if (!added) {
             sendError(session, message.getRoomId(), "Room is full");
@@ -152,16 +153,22 @@ public class SignalingWebSocketHandler extends TextWebSocketHandler {
         // Tell the newly-joined peer who is already in the room, so it can
         // create RTCPeerConnections and start sending offers to each of them.
         ArrayNode existingPeerIds = objectMapper.createArrayNode();
-        room.getOtherPeers(peer.getPeerId()).forEach(p -> existingPeerIds.add(p.getPeerId()));
+        var peerNames = objectMapper.createObjectNode();
+        room.getOtherPeers(peer.getPeerId()).forEach(p -> {
+            existingPeerIds.add(p.getPeerId());
+            peerNames.put(p.getPeerId(), p.getDisplayName());
+        });
 
         SignalingMessage joinAck = new SignalingMessage(
                 MessageType.JOIN, room.getRoomId(), peer.getPeerId(), null, existingPeerIds);
+        joinAck.setPeerNames(peerNames);
         sendTo(session, joinAck);
 
         // Tell everyone already in the room that a new peer has arrived, so
         // they can prepare to receive an offer from it.
         SignalingMessage joinBroadcast = new SignalingMessage(
                 MessageType.JOIN, room.getRoomId(), peer.getPeerId(), null, null);
+        joinBroadcast.setDisplayName(peer.getDisplayName());
         broadcastToOthers(room, peer.getPeerId(), joinBroadcast);
     }
 
@@ -227,6 +234,14 @@ public class SignalingWebSocketHandler extends TextWebSocketHandler {
 
     private boolean isValidIdentifier(String value) {
         return IDENTIFIER_PATTERN.matcher(value).matches();
+    }
+
+    private String normalizeDisplayName(String raw, String peerId) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty()) {
+            return "Guest " + peerId.substring(0, Math.min(4, peerId.length())).toUpperCase();
+        }
+        return value.length() > 20 ? value.substring(0, 20) : value;
     }
 
     // ---------------------------------------------------------------------

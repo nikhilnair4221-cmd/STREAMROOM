@@ -53,6 +53,17 @@ export const ScreenIcon = (p: IconProps) => (
     <path d="M8 20h8M12 16v4" />
   </Svg>
 );
+export const SoundIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 10v4h3l4 3V7l-4 3H4z" />
+    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10" />
+  </Svg>
+);
+export const SoundOffIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 10v4h3l4 3V7l-4 3H4zM16 10l5 5M21 10l-5 5" />
+  </Svg>
+);
 export const LeaveIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -64,6 +75,24 @@ export const UsersIcon = (p: IconProps) => (
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
     <circle cx="9" cy="7" r="4" />
     <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+  </Svg>
+);
+export const LinkIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15" />
+    <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 7 20l1.15-1.15" />
+  </Svg>
+);
+export const LockIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="10" width="16" height="11" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
+  </Svg>
+);
+export const SettingsIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" />
+    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.7 1.7-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20h-2.4v-.2a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-1.7-1.7.06-.06A1.7 1.7 0 0 0 8.46 15 1.7 1.7 0 0 0 6.9 14H6.7v-2.4h.2a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.88l-.06-.06 1.7-1.7.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 12.73 5.8V5h2.4v.8a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 1.7 1.7-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 12h.2v2.4h-.2A1.7 1.7 0 0 0 19.4 15z" />
   </Svg>
 );
 export const CopyIcon = (p: IconProps) => (

@@ -7,10 +7,11 @@ export function useRoom() {
   const sessionRef = useRef<RoomSession | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
 
-  const join = useCallback((roomId: string) => {
+  const join = useCallback((roomId: string, displayName: string) => {
     sessionRef.current?.leave();
     const session = new RoomSession(
       roomId,
+      displayName,
       { signalingUrl: config.signalingUrl, iceServers: config.iceServers },
       setSnapshot,
     );
@@ -41,7 +42,7 @@ export function useRoom() {
     join,
     leave,
     toggleMic: () => sessionRef.current?.toggleMic(),
-    toggleCamera: () => sessionRef.current?.toggleCamera(),
+    toggleCamera: () => void sessionRef.current?.toggleCamera(),
     startScreenShare: () => void sessionRef.current?.startScreenShare(),
     stopScreenShare: () => sessionRef.current?.stopScreenShare(),
   };

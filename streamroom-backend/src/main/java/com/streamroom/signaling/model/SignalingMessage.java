@@ -22,6 +22,8 @@ public class SignalingMessage {
     private String senderId;
     private String targetId;
     private JsonNode payload;
+    private String displayName;
+    private JsonNode peerNames;
 
     public SignalingMessage() {
         // required by Jackson for deserialization
@@ -73,6 +75,22 @@ public class SignalingMessage {
 
     public void setPayload(JsonNode payload) {
         this.payload = payload;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public JsonNode getPeerNames() {
+        return peerNames;
+    }
+
+    public void setPeerNames(JsonNode peerNames) {
+        this.peerNames = peerNames;
     }
 
     @Override

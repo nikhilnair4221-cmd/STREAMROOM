@@ -11,11 +11,17 @@ public class Peer {
     private final String peerId;
     private final String roomId;
     private final WebSocketSession session;
+    private final String displayName;
 
-    public Peer(String peerId, String roomId, WebSocketSession session) {
+    public Peer(String peerId, String roomId, WebSocketSession session, String displayName) {
         this.peerId = peerId;
         this.roomId = roomId;
         this.session = session;
+        this.displayName = displayName;
+    }
+
+    public Peer(String peerId, String roomId, WebSocketSession session) {
+        this(peerId, roomId, session, "Guest " + peerId.substring(0, Math.min(4, peerId.length())).toUpperCase());
     }
 
     public String getPeerId() {
@@ -28,5 +34,9 @@ public class Peer {
 
     public WebSocketSession getSession() {
         return session;
+    }
+
+    public String getDisplayName() {
+        return displayName;
     }
 }

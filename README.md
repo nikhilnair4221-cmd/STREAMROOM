@@ -77,7 +77,7 @@ cd streamroom-backend
 The signaling server listens at:
 
 ```text
-ws://localhost:8080/ws/signaling
+ws://localhost:10000/ws/signaling
 ```
 
 In a second terminal, start the frontend from the project root:
@@ -150,6 +150,16 @@ Verified:
 - Microphone and camera track toggles
 - Participant leave and rejoin
 
+### Three-level real-world test plan
+
+| Level | Setup | Current result |
+|---|---|---|
+| 1 | Two isolated browser sessions on one laptop | **PASS** locally: join, peer discovery, camera/microphone toggles, leave, and rejoin completed |
+| 2 | Two physical devices on different networks, such as Wi-Fi and mobile hotspot | **NOT PERFORMED**: requires a second device/network and TURN-capable deployment validation |
+| 3 | Three to six participants | **PARTIAL**: three local browser sessions were exercised; four-to-six participant media quality remains unverified |
+
+Level 1 is a repeatable smoke test for signaling and the core media lifecycle. Level 2 must be performed with two physical devices on genuinely different networks; two tabs on one laptop do not simulate NAT traversal. Level 3 should be repeated with human participants and should record audio quality, screen sharing, CPU use, and connection quality at each participant count.
+
 Remaining environment-dependent validation:
 
 - Human-audible audio quality and echo assessment
@@ -171,8 +181,6 @@ src/
 streamroom-backend/
   src/main/         Spring Boot signaling server
   src/test/         Signaling authorization and room-management tests
-legacy-root-frontend/
-  Archived pre-consolidation frontend
 ```
 
 ## License

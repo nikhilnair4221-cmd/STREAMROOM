@@ -4,9 +4,11 @@ import { buildInviteLink, guestName } from '../lib/room';
 import type { RemotePeerView, SessionSnapshot } from '../webrtc/RoomSession';
 import { Controls } from './Controls';
 import { AlertIcon, CheckIcon, CopyIcon, ScreenIcon } from './icons';
+import { LoadingIndicator } from './LoadingIndicator';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { TopBar } from './TopBar';
 import { AvatarPlaceholder, VideoTile } from './VideoTile';
+import { CosmicBackground } from './CosmicBackground';
 
 interface Props {
   roomId: string;
@@ -38,6 +40,10 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
   const [pinned, setPinned] = useState<string | null>(null);
   const [toasts, setToasts] = useState<RoomToast[]>([]);
   const knownPeers = useRef<Set<string> | null>(null);
+  const peerNames = useRef(new Map<string, string>());
+  const soundContext = useRef<AudioContext | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('streamroom.soundEffects') !== 'off');
+  const [volume, setVolume] = useState(() => Number(localStorage.getItem('streamroom.playbackVolume') ?? '1'));
   const invite = useCopy();
   const inviteLink = useMemo(() => buildInviteLink(roomId), [roomId]);
 
@@ -51,31 +57,64 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
 
   useEffect(() => {
     const current = new Set(s.peers.map((peer) => peer.id));
+    s.peers.forEach((peer) => peerNames.current.set(peer.id, peer.name));
     const previous = knownPeers.current;
     knownPeers.current = current;
     if (!previous || s.status === 'starting' || s.status === 'connecting' || s.status === 'reconnecting') return;
 
     const events: RoomToast[] = [];
     for (const id of current) {
-      if (!previous.has(id)) events.push({ id: `${id}:join:${Date.now()}`, kind: 'join', name: guestName(id) });
+      if (!previous.has(id)) {
+        const peer = s.peers.find((candidate) => candidate.id === id);
+        events.push({ id: `${id}:join:${Date.now()}`, kind: 'join', name: peer?.name || guestName(id) });
+      }
     }
     for (const id of previous) {
-      if (!current.has(id)) events.push({ id: `${id}:leave:${Date.now()}`, kind: 'leave', name: guestName(id) });
+      if (!current.has(id)) events.push({ id: `${id}:leave:${Date.now()}`, kind: 'leave', name: peerNames.current.get(id) || guestName(id) });
     }
     if (events.length === 0) return;
+
+    if (soundEnabled) {
+      try {
+        const context = soundContext.current ?? new AudioContext();
+        soundContext.current = context;
+        void context.resume().then(() => playParticipantTone(context, events.some((event) => event.kind === 'join'))).catch(() => undefined);
+      } catch {
+        // Audio support is optional and must never affect room state.
+      }
+    }
 
     setToasts((existing) => [...existing, ...events].slice(-4));
     const timer = window.setTimeout(() => {
       setToasts((existing) => existing.filter((toast) => !events.some((event) => event.id === toast.id)));
     }, 4200);
     return () => window.clearTimeout(timer);
-  }, [s.peers, s.status]);
+  }, [s.peers, s.status, soundEnabled]);
+
+  useEffect(() => () => {
+    void soundContext.current?.close();
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    localStorage.setItem('streamroom.soundEffects', next ? 'on' : 'off');
+    if (next) {
+      try {
+        const context = soundContext.current ?? new AudioContext();
+        soundContext.current = context;
+        void context.resume().catch(() => undefined);
+      } catch {
+        // Audio support is optional and must never affect room state.
+      }
+    }
+  };
 
   const participantCount = s.peers.length + 1;
   const degraded = s.status === 'connecting' || s.status === 'reconnecting';
   const canShareApi = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
   const shareBlockedReason = !canShareApi
-    ? "Screen sharing isn't supported in this browser"
+    ? "Screen sharing isn't supported by this browser. Try a supported desktop browser."
     : s.status !== 'connected'
       ? 'Available once you are connected'
       : null;
@@ -93,7 +132,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
       key="local-camera"
       testId="tile-local-camera"
       stream={s.localCamera}
-      name="You"
+      name={s.displayName}
       muted
       mirrored
       small={small}
@@ -104,6 +143,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
           <AvatarPlaceholder text="Camera off" />
         ) : undefined
       }
+      volume={0}
     />
   );
 
@@ -112,8 +152,9 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
       key={`${p.id}-camera`}
       testId={`tile-remote-camera-${p.id}`}
       stream={p.camera}
-      name={guestName(p.id)}
+      name={p.name}
       connection={p.connectionState}
+      volume={volume}
       small={small}
       placeholder={p.camera ? undefined : <AvatarPlaceholder text="Connecting…" />}
     />
@@ -127,11 +168,12 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
         testId={`tile-remote-screen-${p.id}`}
         kind="screen"
         stream={p.screen}
-        name={guestName(p.id)}
+        name={p.name}
         connection={p.connectionState}
+        volume={volume}
         feature={isFeature}
         onSelect={isFeature ? undefined : () => setPinned(entry.key)}
-        selectLabel={`Show ${guestName(p.id)}'s screen in the main view`}
+        selectLabel={`Show ${p.name}'s screen in the main view`}
       />
     );
   };
@@ -154,7 +196,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
         testId="tile-local-screen"
         kind="screen"
         stream={null}
-        name="You"
+        name={s.displayName}
         small
         onSelect={() => setPinned('screen:local')}
         selectLabel="Show your sharing status in the main view"
@@ -168,8 +210,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
     stage = (
       <div className="stage stage--grid">
         <div className="stage__empty" role="status">
-          <strong>Waiting for camera and microphone</strong>
-          <span>Allow access in your browser to enter the room.</span>
+          <LoadingIndicator label="Preparing your space" detail="Allow microphone or camera access to share media with your friends." />
         </div>
       </div>
     );
@@ -210,6 +251,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
 
   return (
     <div className={`room ${degraded ? 'room--banner' : ''}`}>
+      <CosmicBackground intensity="quiet" />
       <TopBar
         roomId={roomId}
         status={s.status}
@@ -217,6 +259,14 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((v) => !v)}
         onLeave={onLeave}
+        quality={s.quality}
+        soundEnabled={soundEnabled}
+        onToggleSound={toggleSound}
+        volume={volume}
+        onVolumeChange={(next) => {
+          setVolume(next);
+          localStorage.setItem('streamroom.playbackVolume', String(next));
+        }}
       />
 
       {degraded && (
@@ -224,7 +274,7 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
           <AlertIcon size={16} />
           {s.status === 'reconnecting'
             ? 'Connection to the server was lost. Reconnecting — your call will resume automatically.'
-            : 'Connecting to the signaling server…'}
+            : 'Connecting to the room…'}
         </div>
       )}
 
@@ -244,6 +294,17 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
         ))}
       </div>
 
+      {s.screenShareError && (
+        <div className="screen-error" role="alert" data-testid="screen-share-error">
+          {s.screenShareError}
+        </div>
+      )}
+      {!canShareApi && (
+        <div className="screen-error" role="status" data-testid="screen-share-unsupported">
+          Screen sharing isn't supported by this browser. Try a supported desktop browser.
+        </div>
+      )}
+
       <Controls
         micEnabled={s.micEnabled}
         cameraEnabled={s.cameraEnabled}
@@ -258,4 +319,21 @@ export function RoomView({ roomId, snapshot: s, onToggleMic, onToggleCamera, onS
       />
     </div>
   );
+}
+
+function playParticipantTone(context: AudioContext, joined: boolean): void {
+  const now = context.currentTime;
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(joined ? 0.045 : 0.025, now + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+  gain.connect(context.destination);
+  [joined ? 520 : 430, joined ? 720 : 300].forEach((frequency, index) => {
+    const oscillator = context.createOscillator();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = frequency;
+    oscillator.connect(gain);
+    oscillator.start(now + index * 0.07);
+    oscillator.stop(now + 0.13 + index * 0.07);
+  });
 }

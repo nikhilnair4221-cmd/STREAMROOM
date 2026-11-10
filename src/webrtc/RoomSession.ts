@@ -2,10 +2,12 @@ import { SignalingClient } from '../signaling/SignalingClient';
 import type {
   ErrorPayload,
   IcePayload,
+  JoinPeer,
   MessageType,
   SdpPayload,
   SignalingMessage,
 } from '../types/signaling';
+import { collectWebRtcStats, type WebRtcStats } from './stats';
 
 export type SessionStatus =
   | 'idle'
@@ -15,9 +17,11 @@ export type SessionStatus =
   | 'reconnecting'
   | 'error'
   | 'left';
+export type ConnectionQuality = 'good' | 'unstable' | 'poor';
 
 export interface RemotePeerView {
   id: string;
+  name: string;
   camera: MediaStream | null;
   screen: MediaStream | null;
   connectionState: RTCPeerConnectionState;
@@ -27,6 +31,7 @@ export interface SessionSnapshot {
   status: SessionStatus;
   error: string | null;
   peerId: string;
+  displayName: string;
   localCamera: MediaStream | null;
   localScreen: MediaStream | null;
   hasMic: boolean;
@@ -35,6 +40,8 @@ export interface SessionSnapshot {
   cameraEnabled: boolean;
   sharing: boolean;
   peers: RemotePeerView[];
+  quality: ConnectionQuality;
+  screenShareError: string | null;
 }
 
 export interface SessionConfig {
@@ -44,6 +51,7 @@ export interface SessionConfig {
 
 interface PeerEntry {
   id: string;
+  displayName: string;
   pc: RTCPeerConnection;
   /** Perfect-negotiation role: the polite side yields on offer collisions. */
   polite: boolean;
@@ -53,6 +61,7 @@ interface PeerEntry {
   tracksAdded: boolean;
   restartedIce: boolean;
   screenSender: RTCRtpSender | null;
+  videoSender: RTCRtpSender | null;
   /** Current screen stream id announced by the remote peer. */
   screenStreamId: string | null;
   /** Every screen stream id the remote ever announced (to never mistake a stale one for a camera). */
@@ -62,6 +71,11 @@ interface PeerEntry {
   remoteStreams: Map<string, MediaStream>;
   /** Serialises async handling of incoming messages for this peer. */
   chain: Promise<void>;
+  previousStats: WebRtcStats | undefined;
+  quality: ConnectionQuality;
+  qualityCandidate: ConnectionQuality;
+  qualityCandidateCount: number;
+  qualityTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /**
@@ -83,9 +97,13 @@ export class RoomSession {
   private readonly peers = new Map<string, PeerEntry>();
   private status: SessionStatus = 'idle';
   private error: string | null = null;
+  private screenShareError: string | null = null;
+  private joinTimeout: ReturnType<typeof setTimeout> | null = null;
+  private cameraAvailable = false;
 
   constructor(
     private readonly roomId: string,
+    private readonly displayName: string,
     private readonly cfg: SessionConfig,
     private readonly onChange: (snapshot: SessionSnapshot) => void,
   ) {}
@@ -100,6 +118,7 @@ export class RoomSession {
 
     try {
       this.localStream = await acquireLocalMedia();
+      this.cameraAvailable = this.localStream.getVideoTracks().length > 0;
     } catch (err) {
       this.fail(`Could not access camera/microphone: ${describe(err)}`);
       return;
@@ -111,6 +130,7 @@ export class RoomSession {
     }
 
     this.setStatus('connecting');
+    this.armJoinTimeout();
     this.signaling = new SignalingClient(this.cfg.signalingUrl, {
       onOpen: () => this.onSignalingOpen(),
       onMessage: (m) => this.onSignalingMessage(m),
@@ -125,6 +145,7 @@ export class RoomSession {
     this.status = 'left'; // set before closing so onClose is ignored
     this.signaling?.close();
     this.signaling = null;
+    this.clearJoinTimeout();
     this.closeAllPeers();
     this.stopScreenTracks();
     this.stopLocalMedia();
@@ -137,17 +158,56 @@ export class RoomSession {
     this.emit();
   }
 
-  toggleCamera(): void {
-    const tracks = this.localStream?.getVideoTracks() ?? [];
-    const next = !tracks.some((t) => t.enabled);
-    tracks.forEach((t) => (t.enabled = next));
+  async toggleCamera(): Promise<void> {
+    const activeTrack = this.localStream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null;
+    if (activeTrack) {
+      this.stopCameraTracks();
+      this.emit();
+      return;
+    }
+
+    if (this.status !== 'connected' && this.status !== 'reconnecting') return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.error = 'Could not enable camera: camera access is unavailable on this page.';
+      this.emit();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const track = stream.getVideoTracks()[0];
+      if (!track || this.hasLeft()) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      track.addEventListener('ended', () => {
+        if (this.localStream?.getVideoTracks().includes(track)) {
+          this.localStream.removeTrack(track);
+          this.emit();
+        }
+      });
+      if (!this.localStream) this.localStream = stream;
+      else {
+        this.localStream.getVideoTracks().forEach((oldTrack) => {
+          this.localStream?.removeTrack(oldTrack);
+          oldTrack.stop();
+        });
+        this.localStream.addTrack(track);
+      }
+      this.cameraAvailable = true;
+      for (const entry of this.peers.values()) this.addOrReplaceVideoTrack(entry, track);
+    } catch (err) {
+      this.error = `Could not enable camera: ${describe(err)}`;
+      console.warn('[webrtc] enabling camera failed:', describe(err));
+    }
     this.emit();
   }
 
   async startScreenShare(): Promise<void> {
+    this.screenShareError = null;
     if (this.screenStream || this.status !== 'connected') return;
     if (!navigator.mediaDevices?.getDisplayMedia) {
-      console.warn('[webrtc] getDisplayMedia not supported in this browser');
+      this.screenShareError = "Screen sharing isn't supported by this browser. Try a supported desktop browser.";
+      this.emit();
       return;
     }
 
@@ -155,7 +215,13 @@ export class RoomSession {
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     } catch (err) {
-      console.info('[webrtc] screen share cancelled or denied:', describe(err));
+      if (describe(err).includes('NotAllowedError')) {
+        this.screenShareError = 'Screen sharing was cancelled or blocked. Allow capture access and try again.';
+      } else {
+        this.screenShareError = `Screen sharing could not start: ${describe(err)}`;
+      }
+      console.info('[webrtc] screen share failed:', describe(err));
+      this.emit();
       return;
     }
     const track = stream.getVideoTracks()[0];
@@ -169,6 +235,7 @@ export class RoomSession {
 
     // Must be set BEFORE addTrack: negotiationneeded reads it for the metadata.
     this.screenStream = stream;
+    this.screenShareError = null;
     for (const entry of this.peers.values()) {
       if (entry.tracksAdded) entry.screenSender = entry.pc.addTrack(track, stream);
     }
@@ -207,6 +274,7 @@ export class RoomSession {
     this.closeAllPeers();
     this.peerId = crypto.randomUUID();
     this.setStatus(this.status === 'connected' ? 'reconnecting' : 'connecting');
+    this.armJoinTimeout();
   }
 
   private onSignalingMessage(msg: SignalingMessage): void {
@@ -219,13 +287,19 @@ export class RoomSession {
       case 'join':
         if (msg.senderId === this.peerId) {
           // Ack for our own JOIN: payload lists peers already in the room.
-          const existing = Array.isArray(msg.payload) ? (msg.payload as string[]) : [];
+          const existing: unknown[] = Array.isArray(msg.payload) ? msg.payload : [];
           this.setStatus('connected');
-          for (const id of existing) this.createPeer(id, true);
+          this.clearJoinTimeout();
+          for (const peer of existing) {
+            const details = typeof peer === 'string'
+              ? { id: peer, displayName: msg.peerNames?.[peer] ?? '' }
+              : peer as JoinPeer;
+            this.createPeer(details.id, true, details.displayName);
+          }
         } else {
           // Someone else joined. Prepare for their offer; do NOT offer
           // ourselves (the newcomer is the designated initial offerer).
-          this.createPeer(msg.senderId, false);
+          this.createPeer(msg.senderId, false, msg.displayName);
         }
         break;
 
@@ -249,8 +323,7 @@ export class RoomSession {
       case 'error': {
         const reason = (msg.payload as ErrorPayload | undefined)?.reason ?? 'Unknown server error';
         console.warn('[signaling] server error:', reason);
-        // "Room is full" is fatal for this join attempt; others are transient.
-        if (reason === 'Room is full') this.fail(reason);
+        this.fail(reason);
         break;
       }
     }
@@ -260,9 +333,10 @@ export class RoomSession {
   // Peer connections
   // ------------------------------------------------------------------
 
-  private createPeer(remoteId: string, addTracksNow: boolean): PeerEntry {
+  private createPeer(remoteId: string, addTracksNow: boolean, displayName = ''): PeerEntry {
     const existing = this.peers.get(remoteId);
     if (existing) {
+      if (displayName) existing.displayName = displayName;
       if (addTracksNow) this.addLocalTracks(existing);
       return existing;
     }
@@ -270,6 +344,7 @@ export class RoomSession {
     const pc = new RTCPeerConnection({ iceServers: this.cfg.iceServers });
     const entry: PeerEntry = {
       id: remoteId,
+      displayName: displayName || `Guest ${remoteId.slice(0, 4).toUpperCase()}`,
       pc,
       polite: this.peerId < remoteId,
       makingOffer: false,
@@ -278,11 +353,17 @@ export class RoomSession {
       tracksAdded: false,
       restartedIce: false,
       screenSender: null,
+      videoSender: null,
       screenStreamId: null,
       knownScreenIds: new Set(),
       pendingCandidates: [],
       remoteStreams: new Map(),
       chain: Promise.resolve(),
+      previousStats: undefined,
+      quality: 'good',
+      qualityCandidate: 'good',
+      qualityCandidateCount: 0,
+      qualityTimer: null,
     };
 
     pc.onicecandidate = ({ candidate }) => {
@@ -327,6 +408,7 @@ export class RoomSession {
 
     this.peers.set(remoteId, entry);
     if (addTracksNow) this.addLocalTracks(entry);
+    this.startStatsPolling(entry);
     this.emit();
     return entry;
   }
@@ -336,11 +418,39 @@ export class RoomSession {
     entry.tracksAdded = true;
     const stream = this.localStream;
     if (stream) {
-      for (const track of stream.getTracks()) entry.pc.addTrack(track, stream);
+      for (const track of stream.getTracks()) {
+        const sender = entry.pc.addTrack(track, stream);
+        if (track.kind === 'video') entry.videoSender = sender;
+      }
     }
+
     const screen = this.screenStream;
     const screenTrack = screen?.getVideoTracks()[0];
     if (screen && screenTrack) entry.screenSender = entry.pc.addTrack(screenTrack, screen);
+  }
+
+  private addOrReplaceVideoTrack(entry: PeerEntry, track: MediaStreamTrack): void {
+    if (!entry.tracksAdded) {
+      this.addLocalTracks(entry);
+      return;
+    }
+    if (entry.videoSender) {
+      void entry.videoSender.replaceTrack(track).catch((err) => console.warn('[webrtc] video replace failed', err));
+      return;
+    }
+    entry.videoSender = entry.pc.addTrack(track, this.localStream ?? new MediaStream([track]));
+  }
+
+  private stopCameraTracks(): void {
+    const tracks = this.localStream?.getVideoTracks() ?? [];
+    for (const track of tracks) {
+      this.localStream?.removeTrack(track);
+      track.stop();
+    }
+    for (const entry of this.peers.values()) {
+      if (!entry.videoSender) continue;
+      void entry.videoSender.replaceTrack(null).catch((err) => console.warn('[webrtc] camera detach failed', err));
+    }
   }
 
   private removePeer(remoteId: string): void {
@@ -364,7 +474,51 @@ export class RoomSession {
     entry.pc.onconnectionstatechange = null;
     for (const s of entry.remoteStreams.values()) s.onremovetrack = null;
     entry.remoteStreams.clear();
+    if (entry.qualityTimer) clearTimeout(entry.qualityTimer);
     entry.pc.close();
+  }
+
+  private startStatsPolling(entry: PeerEntry): void {
+    const poll = async () => {
+      if (!this.peers.has(entry.id) || entry.pc.connectionState === 'closed') return;
+      try {
+        const stats = await collectWebRtcStats(entry.pc, entry.previousStats);
+        entry.previousStats = stats;
+        const nextQuality = qualityFor(stats);
+        if (nextQuality === entry.quality) {
+          entry.qualityCandidate = nextQuality;
+          entry.qualityCandidateCount = 0;
+        } else if (nextQuality === entry.qualityCandidate) {
+          entry.qualityCandidateCount += 1;
+          const requiredSamples = nextQuality === 'good' ? 3 : 2;
+          if (entry.qualityCandidateCount >= requiredSamples) {
+            entry.quality = nextQuality;
+            entry.qualityCandidateCount = 0;
+          }
+        } else {
+          entry.qualityCandidate = nextQuality;
+          entry.qualityCandidateCount = 1;
+        }
+        this.applyVideoBudget(entry, entry.quality);
+        this.emit();
+      } catch (err) {
+        console.warn('[webrtc] stats collection failed', err);
+      }
+      entry.qualityTimer = setTimeout(poll, 3000);
+    };
+    entry.qualityTimer = setTimeout(poll, 3000);
+  }
+
+  private applyVideoBudget(entry: PeerEntry, quality: ConnectionQuality): void {
+    const sender = entry.videoSender;
+    if (!sender || !('getParameters' in sender) || !('setParameters' in sender)) return;
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) return;
+    const budget = quality === 'poor' ? { maxBitrate: 350_000, maxFramerate: 15 } : quality === 'unstable' ? { maxBitrate: 700_000, maxFramerate: 20 } : { maxBitrate: 1_200_000, maxFramerate: 30 };
+    const changed = parameters.encodings.some((encoding) => encoding.maxBitrate !== budget.maxBitrate || encoding.maxFramerate !== budget.maxFramerate);
+    if (!changed) return;
+    parameters.encodings = parameters.encodings.map((encoding) => ({ ...encoding, ...budget }));
+    void sender.setParameters(parameters).catch((err) => console.warn('[webrtc] video quality update failed', err));
   }
 
   // ------------------------------------------------------------------
@@ -449,7 +603,7 @@ export class RoomSession {
   }
 
   private sendRaw(type: 'join' | 'leave' | 'JOIN' | 'LEAVE'): void {
-    this.signaling?.send({ type, roomId: this.roomId, senderId: this.peerId });
+    this.signaling?.send({ type, roomId: this.roomId, senderId: this.peerId, ...(type.toLowerCase() === 'join' ? { displayName: this.displayName } : {}) });
   }
 
   // ------------------------------------------------------------------
@@ -471,6 +625,7 @@ export class RoomSession {
     this.status = 'error';
     this.signaling?.close();
     this.signaling = null;
+    this.clearJoinTimeout();
     this.closeAllPeers();
     this.stopScreenTracks();
     this.stopLocalMedia();
@@ -499,15 +654,38 @@ export class RoomSession {
       status: this.status,
       error: this.error,
       peerId: this.peerId,
+      displayName: this.displayName,
       localCamera: this.localStream,
       localScreen: this.screenStream,
       hasMic: audio.length > 0,
-      hasCamera: video.length > 0,
-      micEnabled: audio.some((t) => t.enabled),
-      cameraEnabled: video.some((t) => t.enabled),
+      hasCamera: this.cameraAvailable,
+      micEnabled: audio.some((t) => t.enabled && t.readyState === 'live'),
+      cameraEnabled: video.some((t) => t.enabled && t.readyState === 'live'),
       sharing: this.screenStream !== null,
       peers: [...this.peers.values()].map((e) => this.viewOf(e)),
+      quality: this.overallQuality(),
+      screenShareError: this.screenShareError,
     };
+  }
+
+  private overallQuality(): ConnectionQuality {
+    if ([...this.peers.values()].some((entry) => entry.quality === 'poor')) return 'poor';
+    if ([...this.peers.values()].some((entry) => entry.quality === 'unstable')) return 'unstable';
+    return 'good';
+  }
+
+  private armJoinTimeout(): void {
+    this.clearJoinTimeout();
+    this.joinTimeout = setTimeout(() => {
+      if (this.status === 'starting' || this.status === 'connecting' || this.status === 'reconnecting') {
+        this.fail('The room could not be reached. Check your connection and try again.');
+      }
+    }, 20_000);
+  }
+
+  private clearJoinTimeout(): void {
+    if (this.joinTimeout) clearTimeout(this.joinTimeout);
+    this.joinTimeout = null;
   }
 
   private viewOf(entry: PeerEntry): RemotePeerView {
@@ -519,7 +697,7 @@ export class RoomSession {
       else if (entry.knownScreenIds.has(id)) continue; // stale, stopped screen share
       else if (!camera) camera = stream;
     }
-    return { id: entry.id, camera, screen, connectionState: entry.pc.connectionState };
+    return { id: entry.id, name: entry.displayName, camera, screen, connectionState: entry.pc.connectionState };
   }
 }
 
@@ -535,9 +713,29 @@ async function acquireLocalMedia(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   } catch (err) {
-    console.warn('[webrtc] camera+mic failed, trying mic only:', describe(err));
-    return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    console.warn('[webrtc] camera+mic failed, trying microphone only:', describe(err));
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    } catch (audioErr) {
+      console.warn('[webrtc] microphone-only media failed, trying camera only:', describe(audioErr));
+      try {
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch {
+        throw err;
+      }
+    }
   }
+}
+
+function qualityFor(stats: WebRtcStats): ConnectionQuality {
+  const poor = (stats.roundTripTimeMs !== null && stats.roundTripTimeMs > 450)
+    || (stats.packetLossRate !== null && stats.packetLossRate > 0.1)
+    || (stats.jitterMs !== null && stats.jitterMs > 40);
+  if (poor) return 'poor';
+  const unstable = (stats.roundTripTimeMs !== null && stats.roundTripTimeMs > 220)
+    || (stats.packetLossRate !== null && stats.packetLossRate > 0.03)
+    || (stats.jitterMs !== null && stats.jitterMs > 20);
+  return unstable ? 'unstable' : 'good';
 }
 
 function describe(err: unknown): string {

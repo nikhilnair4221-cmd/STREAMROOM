@@ -6,7 +6,7 @@ streamroom:
   # Comma-separated list of allowed origins for the WebSocket endpoint.
   # "*" is fine for local development; set this to your real frontend
   # origin(s) before deploying anywhere.
-  allowed-origins: ${STREAMROOM_ALLOWED_ORIGINS:https://streamroom-pearl.vercel.app}
+  allowed-origins: ${STREAMROOM_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,https://streamroom-pearl.vercel.app}
 
 logging:
   level:

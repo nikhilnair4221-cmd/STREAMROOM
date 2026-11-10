@@ -13,7 +13,7 @@ const turnUsername = env.VITE_TURN_USERNAME?.trim();
 const turnCredential = env.VITE_TURN_CREDENTIAL?.trim();
 
 export const config = {
-  signalingUrl: env.VITE_SIGNALING_URL ?? 'ws://localhost:8080/ws/signaling',
+  signalingUrl: env.VITE_SIGNALING_URL ?? 'ws://localhost:10000/ws/signaling',
   // TURN is optional for local development; credentials must come from deployment
   // environment variables and are never committed to source control.
   iceServers: [

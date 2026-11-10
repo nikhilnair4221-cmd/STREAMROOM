@@ -34,6 +34,14 @@ export interface SignalingMessage<P = unknown> {
   /** Required for OFFER/ANSWER/ICE_CANDIDATE; absent for JOIN/LEAVE. */
   targetId?: string;
   payload?: P;
+  /** Present on JOIN messages; ignored by older signaling servers. */
+  displayName?: string;
+  peerNames?: Record<string, string>;
+}
+
+export interface JoinPeer {
+  id: string;
+  displayName: string;
 }
 
 /**

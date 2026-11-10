@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Lobby } from './components/Lobby';
 import { RoomView } from './components/RoomView';
-import { LogoMark } from './components/icons';
+import { LoadingIndicator } from './components/LoadingIndicator';
 import { useRoom } from './hooks/useRoom';
 import { friendlyError, normalizeRoomCode } from './lib/room';
 
@@ -18,9 +18,9 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const handleJoin = (id: string) => {
+  const handleJoin = (id: string, displayName: string) => {
     setRoomId(id);
-    room.join(id);
+    room.join(id, displayName);
   };
   const handleLeave = () => {
     room.leave();
@@ -30,11 +30,7 @@ export default function App() {
   if (booting) {
     return (
       <main className="app-loader" aria-label="Loading StreamRoom">
-        <div className="app-loader__mark">
-          <LogoMark size={24} />
-        </div>
-        <strong>StreamRoom</strong>
-        <span>Preparing your private room</span>
+        <LoadingIndicator label="Initializing StreamRoom" detail="Preparing your space" />
       </main>
     );
   }

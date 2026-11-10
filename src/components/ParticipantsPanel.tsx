@@ -1,5 +1,5 @@
 import { useCopy } from '../lib/clipboard';
-import { guestName, shortId } from '../lib/room';
+import { shortId } from '../lib/room';
 import type { SessionSnapshot } from '../webrtc/RoomSession';
 import { CheckIcon, CloseIcon, CopyIcon } from './icons';
 
@@ -40,7 +40,7 @@ export function ParticipantsPanel({ snapshot: s, inviteLink, onClose }: Props) {
         <li className="person" data-testid="person-self">
           <div className="person__avatar">YOU</div>
           <div className="person__main">
-            <div className="person__name">You</div>
+            <div className="person__name">{s.displayName}</div>
             <div className="person__sub">
               {s.hasMic ? (s.micEnabled ? 'Mic on' : 'Mic off') : 'No mic'} ·{' '}
               {s.hasCamera ? (s.cameraEnabled ? 'Camera on' : 'Camera off') : 'No camera'}
@@ -53,7 +53,7 @@ export function ParticipantsPanel({ snapshot: s, inviteLink, onClose }: Props) {
           <li className="person" key={p.id} data-testid={`person-${p.id}`}>
             <div className="person__avatar">{shortId(p.id).slice(0, 2)}</div>
             <div className="person__main">
-              <div className="person__name">{guestName(p.id)}</div>
+              <div className="person__name">{p.name}</div>
               <div className="person__sub">
                 <span className={`dot ${dotFor(p.connectionState)}`} />
                 {CONNECTION_TEXT[p.connectionState]}
